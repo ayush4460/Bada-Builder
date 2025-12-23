@@ -9,19 +9,23 @@ const Project = sequelize.define('Project', {
   group_price_sqft: { type: DataTypes.DECIMAL(10, 2), defaultValue: 0 },
 });
 
+// Tower Model
 const Tower = sequelize.define('Tower', {
   name: { type: DataTypes.STRING, allowNull: false },
-  total_floors: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 }, // Total combined
+  type: { type: DataTypes.ENUM('TOWER', 'BUNGALOW'), defaultValue: 'TOWER' },
+  total_floors: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 }, 
   basement_levels: { type: DataTypes.INTEGER, defaultValue: 0 },
-  podium_levels: { type: DataTypes.INTEGER, defaultValue: 0 },
+  shop_levels: { type: DataTypes.INTEGER, defaultValue: 0 },
+  office_levels: { type: DataTypes.INTEGER, defaultValue: 0 },
+  podium_levels: { type: DataTypes.INTEGER, defaultValue: 0 }, // Used for Parking usually
   residential_levels: { type: DataTypes.INTEGER, defaultValue: 0 },
 });
 
 const Floor = sequelize.define('Floor', {
-  floor_number: { type: DataTypes.INTEGER, allowNull: false }, // Physical floor index (0 for G, -1 for B1 etc, though typically 0 or 1 based mapped by display name)
-  name: { type: DataTypes.STRING, allowNull: false }, // "Ground", "1st Floor", "Basement 1"
+  floor_number: { type: DataTypes.INTEGER, allowNull: false }, 
+  name: { type: DataTypes.STRING, allowNull: false }, 
   type: { 
-    type: DataTypes.ENUM('RESIDENTIAL', 'COMMERCIAL', 'PARKING', 'AMENITY'), 
+    type: DataTypes.ENUM('RESIDENTIAL', 'COMMERCIAL', 'PARKING', 'AMENITY', 'OFFICE', 'SHOP', 'BASEMENT'), 
     defaultValue: 'RESIDENTIAL' 
   },
 });

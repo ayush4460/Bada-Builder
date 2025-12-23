@@ -31,83 +31,171 @@ exports.getStructure = async (req, res) => {
 // This is a "Builder" operation. It might be complex.
 // For simplicity: Create a Tower -> Create Floors -> Create Unit Placeholders
 exports.createTower = async (req, res) => {
-  const { name, basement_levels = 0, podium_levels = 0, residential_levels = 10, units_per_floor } = req.body;
+  const { 
+      name, 
+      type = 'TOWER',
+      basement_levels = 0, 
+      shop_levels = 0,
+      office_levels = 0,
+      podium_levels = 0, // Parking
+      residential_levels = 0, 
+      units_per_floor = 4,
+      site_name 
+  } = req.body;
   
   if (!name) {
     return res.status(400).json({ error: 'Name is required' });
   }
 
-  const total_floors = parseInt(basement_levels) + 1 + parseInt(podium_levels) + parseInt(residential_levels); // +1 is Ground
+  // If site_name provided, update Project name (Global context for now)
+  if (site_name) {
+      const { Project } = require('../models');
+      const project = await Project.findOne();
+      if (project) {
+          project.name = site_name;
+          await project.save();
+      } else {
+          await Project.create({ name: site_name });
+      }
+  }
+
+  const base = parseInt(basement_levels) || 0;
+  const shop = parseInt(shop_levels) || 0;
+  const off = parseInt(office_levels) || 0;
+  const park = parseInt(podium_levels) || 0;
+  const resi = parseInt(residential_levels) || 0;
+
+  const total_floors = base + shop + off + park + resi; 
 
   try {
     const tower = await Tower.create({ 
         name, 
+        type,
         total_floors,
-        basement_levels: parseInt(basement_levels),
-        podium_levels: parseInt(podium_levels),
-        residential_levels: parseInt(residential_levels)
+        basement_levels: base,
+        shop_levels: shop,
+        office_levels: off,
+        podium_levels: park,
+        residential_levels: resi
     });
     
-    // 1. Basements (Negative floor numbers: -1, -2...)
-    // Usually B1 is -1, B2 is -2. Let's iterate down.
-    for (let i = 1; i <= basement_levels; i++) {
-        const floor = await Floor.create({
+    // GENERATE FLOORS
+    // Order: Basement (Neg) -> Ground/Shop -> Podium/Parking -> Office -> Residential
+
+    // 1. Basements (Negative numbers: -1 down to -N)
+    for (let i = 1; i <= base; i++) {
+        await Floor.create({
             tower_id: tower.id,
             floor_number: -i,
             name: `Basement ${i}`,
-            type: 'PARKING'
+            type: 'BASEMENT'
         });
-        // Generate placeholder parking units? Or leave empty? 
-        // User asked to "adjust basement for whole layer parking levels". 
-        // We'll skip standard units for now unless requested, or maybe create 1 big unit?
-        // Let's create 'units_per_floor' generic units for consistency if > 0, but maybe mark them PARKING?
-    }
-
-    // 2. Ground Floor (0)
-    await Floor.create({
-        tower_id: tower.id,
-        floor_number: 0,
-        name: 'Ground Floor',
-        type: 'AMENITY' // or COMMERCIAL
-    });
-
-    // 3. Podium Levels (1 to P)
-    for (let i = 1; i <= podium_levels; i++) {
-        await Floor.create({
-            tower_id: tower.id,
-            floor_number: i,
-            name: `Podium ${i}`,
-            type: 'PARKING'
+        // Add generic placeholder unit for basement?
+        await Unit.create({
+             floor_id: (await Floor.findOne({ where: { tower_id: tower.id, floor_number: -i } })).id,
+             unit_number: `B${i}`,
+             carpet_area: 0,
+             super_built_up_area: 0,
+             status: 'AVAILABLE',
+             price: 0
         });
     }
 
-    // 4. Residential Floors (Starting from podium_levels + 1)
-    const start_res_floor = parseInt(podium_levels) + 1;
-    for (let i = 0; i < residential_levels; i++) {
-        const floorNum = start_res_floor + i;
+    let currentFloorIndex = 0; // Starts at Ground (0)
+
+    // 2. Shops (Ground + Up)
+    // If shop_levels > 0, they take the lowest positive slots.
+    for (let i = 0; i < shop; i++) {
+        const fName = (currentFloorIndex === 0) ? "Ground Floor (Shops)" : `Shop Level ${currentFloorIndex}`;
         const floor = await Floor.create({
             tower_id: tower.id,
-            floor_number: floorNum,
-            name: `Floor ${floorNum}`,
+            floor_number: currentFloorIndex,
+            name: fName,
+            type: 'SHOP'
+        });
+        
+        // Create Shop Units
+        const shopsCount = units_per_floor > 0 ? units_per_floor : 2; 
+        for (let u = 1; u <= shopsCount; u++) {
+            await Unit.create({
+                floor_id: floor.id,
+                unit_number: `S-${currentFloorIndex === 0 ? 'G' : currentFloorIndex}-${u}`,
+                carpet_area: 0, super_built_up_area: 0, status: 'AVAILABLE'
+            });
+        }
+        currentFloorIndex++;
+    }
+
+    // 3. Offices
+    for (let i = 0; i < off; i++) {
+        const floor = await Floor.create({
+            tower_id: tower.id,
+            floor_number: currentFloorIndex,
+            name: `Office Level ${currentFloorIndex}`,
+            type: 'OFFICE'
+        });
+        // Create Office Units
+        const officesCount = units_per_floor > 0 ? units_per_floor : 2;
+        for (let u = 1; u <= officesCount; u++) {
+            await Unit.create({
+                floor_id: floor.id,
+                unit_number: `OFF-${currentFloorIndex}-${u}`,
+                carpet_area: 0, super_built_up_area: 0, status: 'AVAILABLE'
+            });
+        }
+        currentFloorIndex++;
+    }
+
+    // 4. Parking / Podium
+    for (let i = 0; i < park; i++) {
+        // If we haven't used Ground yet (no shops, no offices), this might be 0.
+        // But typically Podium is above Ground if Ground is Lobby/Stilt.
+        // Let's assume if currentFloorIndex is 0, this is Stilt Parking.
+        const fName = (currentFloorIndex === 0) ? "Ground (Stilt Parking)" : `Parking Level ${currentFloorIndex}`;
+        
+        const floor = await Floor.create({
+            tower_id: tower.id,
+            floor_number: currentFloorIndex,
+            name: fName,
+            type: 'PARKING'
+        });
+
+        // Add 1 big Parking Unit block or multiple slots? User said "parking icon for that unit".
+        // Let's add 'units_per_floor' slots for parking management.
+        const slots = units_per_floor > 0 ? units_per_floor : 10;
+        for (let u = 1; u <= slots; u++) {
+             await Unit.create({
+                floor_id: floor.id,
+                unit_number: `P-${currentFloorIndex}-${u}`,
+                carpet_area: 0, super_built_up_area: 0, status: 'AVAILABLE'
+            });
+        }
+        currentFloorIndex++;
+    }
+
+    // 5. Residential
+    for (let i = 0; i < resi; i++) {
+        const fName = (currentFloorIndex === 0) ? "Ground Floor" : `Floor ${currentFloorIndex}`;
+        const floor = await Floor.create({
+            tower_id: tower.id,
+            floor_number: currentFloorIndex,
+            name: fName,
             type: 'RESIDENTIAL'
         });
 
-        // Create Units for Residential only for now, as standard flow
         if (units_per_floor > 0) {
             for (let u = 1; u <= units_per_floor; u++) {
                 await Unit.create({
                     floor_id: floor.id,
-                    unit_number: `${floorNum}${u.toString().padStart(2, '0')}`,
-                    carpet_area: 0,
-                    super_built_up_area: 0,
-                    status: 'AVAILABLE',
-                    price: 0
+                    unit_number: `${currentFloorIndex}${u.toString().padStart(2, '0')}`,
+                    carpet_area: 0, super_built_up_area: 0, status: 'AVAILABLE'
                 });
             }
         }
+        currentFloorIndex++;
     }
 
-    res.status(201).json({ message: 'Tower created successfully', tower });
+    res.status(201).json({ message: 'Structure created successfully', tower });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -125,81 +213,103 @@ exports.deleteTower = async (req, res) => {
 
 exports.updateTower = async (req, res) => {
     const { id } = req.params;
-    const { name, basement_levels, podium_levels, residential_levels, units_per_floor } = req.body;
+    const { 
+        name, 
+        type,
+        basement_levels, 
+        shop_levels, 
+        office_levels, 
+        podium_levels, 
+        residential_levels, 
+        units_per_floor 
+    } = req.body;
 
     try {
         const tower = await Tower.findByPk(id);
         if (!tower) return res.status(404).json({ error: 'Tower not found' });
 
-        const total_floors = parseInt(basement_levels) + 1 + parseInt(podium_levels) + parseInt(residential_levels);
+        const base = parseInt(basement_levels) || 0;
+        const shop = parseInt(shop_levels) || 0;
+        const off = parseInt(office_levels) || 0;
+        const park = parseInt(podium_levels) || 0;
+        const resi = parseInt(residential_levels) || 0;
+
+        const total_floors = base + shop + off + park + resi;
 
         await tower.update({ 
-            name, 
+            name,
+            type,
             total_floors,
-            basement_levels,
-            podium_levels,
-            residential_levels
+            basement_levels: base,
+            shop_levels: shop,
+            office_levels: off,
+            podium_levels: park,
+            residential_levels: resi
         });
-
-        // For structural changes (changing tier counts), it's complex to map old floors to new.
-        // Strategy: Nuke floors and recreate. *WARNING: DATA LOSS on existing unit configs*.
-        // Ideally we should warn the user. For this prototype, we will regenerate content.
         
-        await Floor.destroy({ where: { tower_id: id } }); // Cascade deletes units
+        // REGENERATE LOGIC
+        // Nuke existing floors
+        await Floor.destroy({ where: { tower_id: id } }); 
 
-        // --- Regeneration Logic (Same as Create) ---
+        // Re-use logic from create (This is duplicated, ideally should be a helper function)
+        // I will implement the loop again here for stability within this single tool call replacement.
         
         // 1. Basements
-        for (let i = 1; i <= basement_levels; i++) {
-            await Floor.create({
+        for (let i = 1; i <= base; i++) {
+            const floor = await Floor.create({
                 tower_id: tower.id,
                 floor_number: -i,
                 name: `Basement ${i}`,
-                type: 'PARKING'
+                type: 'BASEMENT'
+            });
+             await Unit.create({
+                 floor_id: floor.id,
+                 unit_number: `B${i}`,
+                 carpet_area: 0, super_built_up_area: 0, status: 'AVAILABLE', price: 0
             });
         }
 
-        // 2. Ground
-        await Floor.create({
-            tower_id: tower.id,
-            floor_number: 0,
-            name: 'Ground Floor',
-            type: 'AMENITY'
-        });
+        let currentFloorIndex = 0;
 
-        // 3. Podiums
-        for (let i = 1; i <= podium_levels; i++) {
-            await Floor.create({
-                tower_id: tower.id,
-                floor_number: i,
-                name: `Podium ${i}`,
-                type: 'PARKING'
-            });
+        // 2. Shops
+        for (let i = 0; i < shop; i++) {
+            const fName = (currentFloorIndex === 0) ? "Ground Floor (Shops)" : `Shop Level ${currentFloorIndex}`;
+            const floor = await Floor.create({ tower_id: tower.id, floor_number: currentFloorIndex, name: fName, type: 'SHOP' });
+            for (let u = 1; u <= (units_per_floor || 2); u++) {
+                await Unit.create({ floor_id: floor.id, unit_number: `S-${currentFloorIndex === 0 ? 'G' : currentFloorIndex}-${u}`, carpet_area: 0, super_built_up_area: 0, status: 'AVAILABLE' });
+            }
+            currentFloorIndex++;
         }
 
-        // 4. Residential
-        const start_res_floor = parseInt(podium_levels) + 1;
-        for (let i = 0; i < residential_levels; i++) {
-            const floorNum = start_res_floor + i;
-            const floor = await Floor.create({
-                tower_id: tower.id,
-                floor_number: floorNum,
-                name: `Floor ${floorNum}`,
-                type: 'RESIDENTIAL'
-            });
+        // 3. Offices
+        for (let i = 0; i < off; i++) {
+            const floor = await Floor.create({ tower_id: tower.id, floor_number: currentFloorIndex, name: `Office Level ${currentFloorIndex}`, type: 'OFFICE' });
+             for (let u = 1; u <= (units_per_floor || 2); u++) {
+                await Unit.create({ floor_id: floor.id, unit_number: `OFF-${currentFloorIndex}-${u}`, carpet_area: 0, super_built_up_area: 0, status: 'AVAILABLE' });
+            }
+            currentFloorIndex++;
+        }
 
+        // 4. Parking
+        for (let i = 0; i < park; i++) {
+            const fName = (currentFloorIndex === 0) ? "Ground (Stilt Parking)" : `Parking Level ${currentFloorIndex}`;
+            const floor = await Floor.create({ tower_id: tower.id, floor_number: currentFloorIndex, name: fName, type: 'PARKING' });
+             for (let u = 1; u <= (units_per_floor || 10); u++) {
+                await Unit.create({ floor_id: floor.id, unit_number: `P-${currentFloorIndex}-${u}`, carpet_area: 0, super_built_up_area: 0, status: 'AVAILABLE' });
+            }
+            currentFloorIndex++;
+        }
+
+        // 5. Residential
+        for (let i = 0; i < resi; i++) {
+            const fName = (currentFloorIndex === 0) ? "Ground Floor" : `Floor ${currentFloorIndex}`;
+            const floor = await Floor.create({ tower_id: tower.id, floor_number: currentFloorIndex, name: fName, type: 'RESIDENTIAL' });
             if (units_per_floor > 0) {
                 for (let u = 1; u <= units_per_floor; u++) {
-                    await Unit.create({
-                        floor_id: floor.id,
-                        unit_number: `${floorNum}${u.toString().padStart(2, '0')}`,
-                        carpet_area: 0,
-                        super_built_up_area: 0,
-                        status: 'AVAILABLE',
-                        price: 0
-                    });
+                    await Unit.create({ floor_id: floor.id, unit_number: `${currentFloorIndex}${u.toString().padStart(2, '0')}`, carpet_area: 0, super_built_up_area: 0, status: 'AVAILABLE' });
                 }
             }
+            currentFloorIndex++;
         }
 
         res.json({ message: 'Tower updated and structure regenerated successfully' });
