@@ -335,12 +335,62 @@ exports.createFloor = async (req, res) => {
 
 exports.updateFloor = async (req, res) => {
     const { id } = req.params;
-    const { floor_number, name, type } = req.body;
+    const { floor_number, name, type, unit_count } = req.body;
     try {
         const floor = await Floor.findByPk(id);
         if (!floor) return res.status(404).json({ error: 'Floor not found' });
         
         await floor.update({ floor_number, name, type });
+
+        // If unit_count is specified, regenerate units
+        if (unit_count !== undefined && unit_count !== null) {
+            const count = parseInt(unit_count);
+            // 1. Delete existing units
+            // Note: This is destructive. In a real app, we might check for bookings.
+            // For now, assuming builder mode allows reset.
+            await Unit.destroy({ where: { floor_id: id } });
+
+            // 2. Generate new units
+            const prefixMap = {
+                'RESIDENTIAL': '',
+                'SHOP': 'S-',
+                'OFFICE': 'OFF-',
+                'PARKING': 'P-',
+                'BASEMENT': 'B-',
+                'COMMERCIAL': 'C-'
+            };
+            
+            const prefix = prefixMap[type] || '';
+            const floorNumStr = floor.floor_number.toString(); 
+
+            // Special naming logic
+            // For Residential: 101, 102... (Floor + XX)
+            // For Others: S-1-1, S-1-2... (Prefix + Floor + Index)
+
+            if (type === 'RESIDENTIAL') {
+                for (let u = 1; u <= count; u++) {
+                     await Unit.create({
+                        floor_id: floor.id,
+                        unit_number: `${floorNumStr}${u.toString().padStart(2, '0')}`,
+                        carpet_area: 0, super_built_up_area: 0, status: 'AVAILABLE'
+                    });
+                }
+            } else {
+                 // Non-residential naming
+                 // Handle Ground (0) or Basement (-1) naming gracefully
+                 let fLabel = floorNumStr;
+                 if (floor.floor_number === 0) fLabel = 'G';
+                 
+                 for (let u = 1; u <= count; u++) {
+                    await Unit.create({
+                        floor_id: floor.id,
+                        unit_number: `${prefix}${fLabel}-${u}`,
+                        carpet_area: 0, super_built_up_area: 0, status: 'AVAILABLE'
+                    });
+                 }
+            }
+        }
+
         res.json(floor);
     } catch (error) {
         res.status(500).json({ error: error.message });

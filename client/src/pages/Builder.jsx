@@ -2,9 +2,10 @@ import React, { useState, useEffect } from 'react';
 import Layout from '../components/Layout';
 import { getStructure, createTower, deleteTower, updateTower } from '../services/api';
 import UnitEditorModal from '../components/UnitEditorModal';
+import FloorEditorModal from '../components/FloorEditorModal';
 import { 
     Plus, Trash2, Layers, Grid, Edit, PlusCircle, MinusCircle, 
-    Home, Briefcase, Store, Car, ArrowDownToLine, Tent, Check
+    Home, Briefcase, Store, Car, ArrowDownToLine, Tent, Check, Pencil
 } from 'lucide-react';
 import clsx from 'clsx';
 
@@ -32,6 +33,7 @@ const Builder = () => {
 
     const [editingTowerId, setEditingTowerId] = useState(null);
     const [selectedUnitId, setSelectedUnitId] = useState(null);
+    const [editingFloor, setEditingFloor] = useState(null);
 
     useEffect(() => {
         loadData();
@@ -346,11 +348,20 @@ const Builder = () => {
                             </div>
                         </div>
                         
-                            {/* Compact Floor Stack Visualization */}
+                        {/* Compact Floor Stack Visualization */}
                          <div className="p-6 overflow-x-auto">
                            <div className="flex flex-col-reverse gap-1.5 min-w-[300px]">
                                {tower.Floors?.map(floor => (
-                                   <div key={floor.id} className="flex items-center gap-4 group">
+                                   <div key={floor.id} className="flex items-center gap-4 group hover:bg-slate-800/30 p-2 rounded-xl transition-colors">
+                                        <div className="w-8 flex flex-col items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                             <button 
+                                                onClick={() => setEditingFloor(floor)}
+                                                className="text-slate-400 hover:text-blue-400 transition-colors"
+                                                title="Edit Floor"
+                                            >
+                                                <Pencil className="w-3 h-3" />
+                                            </button>
+                                        </div>
                                         <div className="w-8 flex justify-end">
                                             {getFloorIcon(floor.type)}
                                         </div>
@@ -395,6 +406,16 @@ const Builder = () => {
                     onSave={loadData}
                 />
             )}
+
+            {/* Modal for Floor Edit */}
+            {editingFloor && (
+                <FloorEditorModal 
+                    floor={editingFloor} 
+                    onClose={() => setEditingFloor(null)}
+                    onSave={loadData}
+                />
+            )}
+
         </Layout>
     );
 };
