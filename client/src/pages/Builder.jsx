@@ -1,16 +1,41 @@
 import React, { useState, useEffect } from 'react';
 import Layout from '../components/Layout';
-import { getStructure, createTower, deleteTower, updateTower } from '../services/api';
+import { getStructure, createTower, deleteTower, updateTower, getProjectSettings, updateProjectSettings } from '../services/api';
 import UnitEditorModal from '../components/UnitEditorModal';
 import FloorEditorModal from '../components/FloorEditorModal';
 import { 
     Plus, Trash2, Layers, Grid, Edit, PlusCircle, MinusCircle, 
-    Home, Briefcase, Store, Car, ArrowDownToLine, Tent, Check, Pencil
+    Home, Briefcase, Store, Car, ArrowDownToLine, Tent, Check, Pencil,
+    ChevronDown
 } from 'lucide-react';
 import clsx from 'clsx';
 
 const Builder = () => {
     const [towers, setTowers] = useState([]);
+    const [project, setProject] = useState(null);
+    const [isSiteExpanded, setIsSiteExpanded] = useState(true);
+    
+    // Site Name Editing State
+    const [isEditingSite, setIsEditingSite] = useState(false);
+    const [tempSiteName, setTempSiteName] = useState('');
+
+    const handleSaveSiteName = async (e) => {
+        e.stopPropagation(); // Prevent accordion toggle
+        try {
+            await updateProjectSettings({ ...project, name: tempSiteName });
+            setProject(prev => ({ ...prev, name: tempSiteName }));
+            setIsEditingSite(false);
+            setSiteName(tempSiteName); // Update wizard default
+        } catch (err) {
+            alert("Error updating site name: " + err.message);
+        }
+    };
+
+    const startEditingSite = (e) => {
+        e.stopPropagation();
+        setIsEditingSite(true);
+        setTempSiteName(project?.name || '');
+    };
     
     // Wizard State
     const [isWizardActive, setIsWizardActive] = useState(false);
@@ -41,20 +66,22 @@ const Builder = () => {
 
     const loadData = async () => {
         try {
-            const res = await getStructure();
-            setTowers(res.data);
-            // Ideally fetch Project Name here too
+            const [structRes, projRes] = await Promise.all([
+                getStructure(),
+                getProjectSettings()
+            ]);
+            setTowers(structRes.data);
+            setProject(projRes.data);
+            if (projRes.data?.name) setSiteName(projRes.data.name);
         } catch (err) {
             console.error(err);
-        } finally {
-            // Loading done
         }
     };
 
     const startWizard = () => {
         setIsWizardActive(true);
         setWizardStep(1);
-        setSiteName('');
+        setSiteName(project?.name || '');
         setStructureCount(1);
         setCurrentConfigIndex(0);
         resetConfig();
@@ -85,10 +112,11 @@ const Builder = () => {
         e.preventDefault();
         
         try {
-            // Send to API
+            // Send to API - we are creating a tower, but strictly speaking we might want to update project name too if it changed
+            // For now, assuming createTower handles structure creation.
             await createTower({
                 ...currentConfig,
-                site_name: siteName // Send site name with every request (or just the first one)
+                site_name: siteName 
             });
 
             // If more structures to configure
@@ -120,7 +148,7 @@ const Builder = () => {
             office_levels: tower.office_levels || 0,
             podium_levels: tower.podium_levels,
             residential_levels: tower.residential_levels,
-            units_per_floor: 4 // This is lost in retrieval unless we check Unit count, defaulting
+            units_per_floor: 4 
         });
         setIsWizardActive(true);
         setWizardStep(2); // Jump straight to config
@@ -162,6 +190,10 @@ const Builder = () => {
             default: return <Layers className="w-4 h-4 text-slate-500" />;
         }
     };
+
+    // Grouping
+    const towerStructures = towers.filter(t => t.type !== 'BUNGALOW');
+    const bungalowStructures = towers.filter(t => t.type === 'BUNGALOW');
 
     return (
         <Layout>
@@ -328,74 +360,133 @@ const Builder = () => {
             )}
 
 
-            {/* Existing Grid View of Towers */}
-            <div className="grid grid-cols-1 gap-8">
-                {towers.map((tower) => (
-                    <div key={tower.id} className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-xl shadow-black/20">
-                        <div className="p-6 border-b border-slate-800 flex justify-between items-center bg-slate-800/30">
-                            <div className="flex items-center gap-4">
-                                <div className={clsx("w-12 h-12 rounded-xl flex items-center justify-center", tower.type === 'BUNGALOW' ? "bg-emerald-500/10 text-emerald-400" : "bg-blue-500/10 text-blue-400")}>
-                                     {tower.type === 'BUNGALOW' ? <Tent className="w-6 h-6" /> : <Building2Icon />}
-                                </div>
-                                <div>
-                                    <h3 className="text-xl font-bold text-slate-200">{tower.name}</h3>
-                                    <p className="text-slate-500 text-xs mt-0.5">{tower.total_floors} Levels • {tower.type || 'TOWER'}</p>
-                                </div>
-                            </div>
-                            <div className="flex gap-2">
-                                <button onClick={() => handleRegularEdit(tower)} className="text-blue-400 hover:bg-blue-900/20 p-2 rounded-lg"><Edit className="w-5 h-5" /></button>
-                                <button onClick={() => handleDelete(tower.id)} className="text-rose-400 hover:bg-rose-900/20 p-2 rounded-lg"><Trash2 className="w-5 h-5" /></button>
-                            </div>
+            {/* SITE CARD */}
+            <div className="border border-slate-800 rounded-3xl overflow-hidden bg-gradient-to-br from-slate-900 via-slate-900 to-slate-950 shadow-2xl">
+                {/* Site Header */}
+                <div 
+                    onClick={() => !isEditingSite && setIsSiteExpanded(!isSiteExpanded)}
+                    className="p-8 border-b border-slate-800/50 flex justify-between items-center cursor-pointer hover:bg-slate-800/30 transition-colors group select-none"
+                >
+                    <div className="flex items-center gap-6">
+                        <div className="w-16 h-16 rounded-2xl bg-blue-600/10 flex items-center justify-center text-blue-500 shadow-inner">
+                            <Layers className="w-8 h-8" />
                         </div>
-                        
-                        {/* Compact Floor Stack Visualization */}
-                         <div className="p-6 overflow-x-auto">
-                           <div className="flex flex-col-reverse gap-1.5 min-w-[300px]">
-                               {tower.Floors?.map(floor => (
-                                   <div key={floor.id} className="flex items-center gap-4 group hover:bg-slate-800/30 p-2 rounded-xl transition-colors">
-                                        <div className="w-8 flex flex-col items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                                             <button 
-                                                onClick={() => setEditingFloor(floor)}
-                                                className="text-slate-400 hover:text-blue-400 transition-colors"
-                                                title="Edit Floor"
-                                            >
-                                                <Pencil className="w-3 h-3" />
-                                            </button>
-                                        </div>
-                                        <div className="w-8 flex justify-end">
-                                            {getFloorIcon(floor.type)}
-                                        </div>
-                                        <div className="w-28 text-right text-[10px] text-slate-500 font-mono uppercase tracking-wider truncate" title={floor.name}>
-                                            {floor.name}
-                                        </div>
-                                        <div className="flex-1 flex gap-1.5 p-1.5 bg-slate-950/30 rounded-lg border border-slate-800/50">
-                                            {floor.Units?.map(unit => (
-                                                <div 
-                                                    key={unit.id}
-                                                    title={`Unit ${unit.unit_number}`}
-                                                    onClick={() => setSelectedUnitId(unit.id)}
-                                                    className={clsx(
-                                                        "h-6 min-w-[32px] px-1 rounded flex items-center justify-center gap-1 text-[9px] font-bold border transition-all cursor-pointer hover:scale-110",
-                                                        unit.status === 'AVAILABLE' ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-400" :
-                                                        unit.status === 'BOOKED' ? "bg-rose-500/10 border-rose-500/20 text-rose-400" :
-                                                        "bg-slate-700/50 border-slate-600 text-slate-400"
-                                                    )}
-                                                >
-                                                    {floor.type === 'SHOP' && <Store className="w-3 h-3 opacity-50" />}
-                                                    {floor.type === 'OFFICE' && <Briefcase className="w-3 h-3 opacity-50" />}
-                                                    {floor.type === 'PARKING' && <Car className="w-3 h-3 opacity-50" />}
-                                                    {floor.type === 'RESIDENTIAL' && <Home className="w-3 h-3 opacity-50" />}
-                                                    {unit.unit_number.split('-').pop()}
-                                                </div>
-                                            ))}
-                                            {floor.Units?.length === 0 && <span className="text-[10px] text-slate-600 italic px-2">Empty Floor</span>}
-                                        </div>
-                                   </div>
-                               ))}
-                           </div>
+                        <div>
+                            <div className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-1">Site Project</div>
+                            
+                            {isEditingSite ? (
+                                <div className="flex items-center gap-2" onClick={e => e.stopPropagation()}>
+                                    <input 
+                                        type="text" 
+                                        value={tempSiteName}
+                                        onChange={(e) => setTempSiteName(e.target.value)}
+                                        className="bg-slate-800 border border-slate-600 rounded-lg px-3 py-1 text-white text-2xl font-bold focus:ring-2 focus:ring-blue-500 outline-none"
+                                        autoFocus
+                                    />
+                                    <button 
+                                        onClick={handleSaveSiteName}
+                                        className="p-2 bg-emerald-600/20 text-emerald-400 rounded-lg hover:bg-emerald-600/30 transition-colors"
+                                    >
+                                        <Check className="w-5 h-5" />
+                                    </button>
+                                    <button 
+                                        onClick={(e) => { e.stopPropagation(); setIsEditingSite(false); }}
+                                        className="p-2 bg-rose-600/20 text-rose-400 rounded-lg hover:bg-rose-600/30 transition-colors"
+                                    >
+                                        <Trash2 className="w-5 h-5 rotate-45" /> {/* Using Trash2 rotated as cancel for now, or just X */}
+                                    </button>
+                                </div>
+                            ) : (
+                                <div className="flex items-center gap-3 group/title">
+                                    <h3 className="text-3xl font-bold text-white group-hover:text-blue-400 transition-colors">
+                                        {project?.name || 'My Project'}
+                                    </h3>
+                                    <button 
+                                        onClick={startEditingSite}
+                                        className="opacity-0 group-hover/title:opacity-100 p-1.5 text-slate-500 hover:text-blue-400 transition-all"
+                                        title="Rename Site"
+                                    >
+                                        <Pencil className="w-4 h-4" />
+                                    </button>
+                                </div>
+                            )}
+
+                            <p className="text-slate-400 mt-1 flex items-center gap-2">
+                                <span className="bg-slate-800 px-2 py-0.5 rounded text-xs">ID: {project?.id || 1}</span>
+                                <span>•</span>
+                                <span>{towers.length} Structures</span>
+                            </p>
                         </div>
                     </div>
-                ))}
+                    <div className={`p-3 rounded-full bg-slate-800 text-slate-400 transition-transform duration-300 ${isSiteExpanded ? 'rotate-180' : ''}`}>
+                         <ChevronDownIcon />
+                    </div>
+                </div>
+
+                {/* Collapsible Content */}
+                {isSiteExpanded && (
+                    <div className="p-8 bg-slate-950/30 animate-in slide-in-from-top-4 duration-300">
+                        {towers.length === 0 ? (
+                            <div className="text-center py-20 border-2 border-dashed border-slate-800 rounded-2xl">
+                                <p className="text-slate-500 mb-4">No structures added yet.</p>
+                                <button onClick={startWizard} className="text-blue-400 hover:text-blue-300 font-medium">Click here to add your first structure</button>
+                            </div>
+                        ) : (
+                            <div className="space-y-12">
+                                
+                                {/* 1. TOWERS SECION */}
+                                {towerStructures.length > 0 && (
+                                    <div>
+                                        <div className="flex items-center gap-3 mb-6">
+                                            <div className="h-px bg-slate-800 flex-1"></div>
+                                            <span className="text-slate-500 text-sm font-bold uppercase tracking-widest flex items-center gap-2">
+                                                <Building2Icon /> Towers ({towerStructures.length})
+                                            </span>
+                                            <div className="h-px bg-slate-800 flex-1"></div>
+                                        </div>
+                                        <div className="grid grid-cols-1 gap-8">
+                                            {towerStructures.map(tower => (
+                                                <TowerCard 
+                                                    key={tower.id} 
+                                                    tower={tower}
+                                                    onEdit={handleRegularEdit}
+                                                    onDelete={handleDelete}
+                                                    onEditFloor={setEditingFloor}
+                                                    onSelectUnit={setSelectedUnitId}
+                                                />
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
+
+                                {/* 2. BUNGALOWS SECTION */}
+                                {bungalowStructures.length > 0 && (
+                                    <div>
+                                         <div className="flex items-center gap-3 mb-6">
+                                            <div className="h-px bg-slate-800 flex-1"></div>
+                                            <span className="text-slate-500 text-sm font-bold uppercase tracking-widest flex items-center gap-2">
+                                                <Tent className="w-4 h-4" /> Bungalows ({bungalowStructures.length})
+                                            </span>
+                                            <div className="h-px bg-slate-800 flex-1"></div>
+                                        </div>
+                                        <div className="grid grid-cols-1 gap-8">
+                                            {bungalowStructures.map(tower => (
+                                                <TowerCard 
+                                                    key={tower.id} 
+                                                    tower={tower}
+                                                    onEdit={handleRegularEdit}
+                                                    onDelete={handleDelete}
+                                                    onEditFloor={setEditingFloor}
+                                                    onSelectUnit={setSelectedUnitId}
+                                                />
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                        )}
+                    </div>
+                )}
             </div>
             
             {/* Modal for Units */}
@@ -417,6 +508,87 @@ const Builder = () => {
             )}
 
         </Layout>
+    );
+};
+
+const getFloorIcon = (type) => {
+    switch (type) {
+        case 'RESIDENTIAL': return <Home className="w-4 h-4 text-emerald-400" />;
+        case 'SHOP': return <Store className="w-4 h-4 text-amber-400" />;
+        case 'OFFICE': return <Briefcase className="w-4 h-4 text-blue-400" />;
+        case 'PARKING': return <Car className="w-4 h-4 text-slate-400" />;
+        case 'BASEMENT': return <ArrowDownToLine className="w-4 h-4 text-slate-500" />;
+        default: return <Layers className="w-4 h-4 text-slate-500" />;
+    }
+};
+
+const TowerCard = ({ tower, onEdit, onDelete, onEditFloor, onSelectUnit }) => {
+    return (
+        <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-xl shadow-black/20 hover:border-slate-700 transition-colors">
+            <div className="p-6 border-b border-slate-800 flex justify-between items-center bg-slate-800/30">
+                <div className="flex items-center gap-4">
+                    <div className={clsx("w-12 h-12 rounded-xl flex items-center justify-center", tower.type === 'BUNGALOW' ? "bg-emerald-500/10 text-emerald-400" : "bg-blue-500/10 text-blue-400")}>
+                            {tower.type === 'BUNGALOW' ? <Tent className="w-6 h-6" /> : <Building2Icon />}
+                    </div>
+                    <div>
+                        <h3 className="text-xl font-bold text-slate-200">{tower.name}</h3>
+                        <p className="text-slate-500 text-xs mt-0.5">{tower.total_floors} Levels • {tower.type || 'TOWER'}</p>
+                    </div>
+                </div>
+                <div className="flex gap-2">
+                    <button onClick={() => onEdit(tower)} className="text-blue-400 hover:bg-blue-900/20 p-2 rounded-lg transition-colors"><Edit className="w-5 h-5" /></button>
+                    <button onClick={() => onDelete(tower.id)} className="text-rose-400 hover:bg-rose-900/20 p-2 rounded-lg transition-colors"><Trash2 className="w-5 h-5" /></button>
+                </div>
+            </div>
+            
+            {/* Compact Floor Stack Visualization */}
+                <div className="p-6 overflow-x-auto custom-scrollbar">
+                <div className="flex flex-col-reverse gap-1.5 min-w-[300px]">
+                    {tower.Floors?.map(floor => (
+                        <div key={floor.id} className="flex items-center gap-4 group hover:bg-slate-800/30 p-2 rounded-xl transition-colors">
+                            <div className="w-8 flex flex-col items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                    <button 
+                                    onClick={() => onEditFloor(floor)}
+                                    className="text-slate-400 hover:text-blue-400 transition-colors"
+                                    title="Edit Floor"
+                                >
+                                    <Pencil className="w-3 h-3" />
+                                </button>
+                            </div>
+                            <div className="w-8 flex justify-end">
+                                {getFloorIcon(floor.type)}
+                            </div>
+                            <div className="w-28 text-right text-[10px] text-slate-500 font-mono uppercase tracking-wider truncate" title={floor.name}>
+                                {floor.name}
+                            </div>
+                            <div className="flex-1 flex gap-1.5 p-1.5 bg-slate-950/30 rounded-lg border border-slate-800/50">
+                                {floor.Units?.map(unit => (
+                                    <div 
+                                        key={unit.id}
+                                        title={`Unit ${unit.unit_number}`}
+                                        onClick={() => onSelectUnit(unit.id)}
+                                        className={clsx(
+                                            "h-6 min-w-[32px] px-1 rounded flex items-center justify-center gap-1 text-[9px] font-bold border transition-all cursor-pointer hover:scale-110",
+                                            unit.status === 'AVAILABLE' ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-400" :
+                                            unit.status === 'BOOKED' ? "bg-rose-500/10 border-rose-500/20 text-rose-400" :
+                                            unit.status === 'ON_HOLD' ? "bg-amber-500/10 border-amber-500/20 text-amber-400" :
+                                            "bg-slate-700/50 border-slate-600 text-slate-400"
+                                        )}
+                                    >
+                                        {floor.type === 'SHOP' && <Store className="w-3 h-3 opacity-50" />}
+                                        {floor.type === 'OFFICE' && <Briefcase className="w-3 h-3 opacity-50" />}
+                                        {floor.type === 'PARKING' && <Car className="w-3 h-3 opacity-50" />}
+                                        {floor.type === 'RESIDENTIAL' && <Home className="w-3 h-3 opacity-50" />}
+                                        {unit.unit_number.split('-').pop()}
+                                    </div>
+                                ))}
+                                {floor.Units?.length === 0 && <span className="text-[10px] text-slate-600 italic px-2">Empty Floor</span>}
+                            </div>
+                        </div>
+                    ))}
+                </div>
+            </div>
+        </div>
     );
 };
 
@@ -448,6 +620,10 @@ const ConfigInput = ({ label, value, onChange, icon }) => (
 
 const Building2Icon = () => (
     <Grid className="w-5 h-5" />
+);
+
+const ChevronDownIcon = () => (
+    <ChevronDown className="w-6 h-6" />
 );
 
 export default Builder;

@@ -3,7 +3,12 @@ const { Unit, Project } = require('../models');
 // GET /api/units/:id
 exports.getUnit = async (req, res) => {
   try {
-    const unit = await Unit.findByPk(req.params.id);
+    const unit = await Unit.findByPk(req.params.id, {
+        include: [{
+            model: require('../models').Floor,
+            include: [{ model: require('../models').Tower }]
+        }]
+    });
     if (!unit) return res.status(404).json({ error: 'Unit not found' });
     res.json(unit);
   } catch (error) {
@@ -15,31 +20,59 @@ exports.getUnit = async (req, res) => {
 exports.updateUnit = async (req, res) => {
   try {
     const { id } = req.params;
-    const { unit_number, unit_type_id, carpet_area, super_built_up_area, status } = req.body;
+    const { 
+        unit_number, 
+        unit_type_id, 
+        // Dimensions
+        carpet_area, 
+        super_built_up_area, 
+        // Config
+        bhk_type,
+        // Status
+        status, 
+        // Pricing Overrides
+        price_per_sqft, 
+        discounted_price_per_sqft
+    } = req.body;
 
-    const unit = await Unit.findByPk(id);
+    const unit = await Unit.findByPk(id, {
+        include: [{ model: require('../models').Floor }]
+    });
     if (!unit) return res.status(404).json({ error: 'Unit not found' });
 
-    // Fetch Project Settings for Price Calculation
-    // Assuming single project for now, ID 1
+    // Fetch Project Settings
     const project = await Project.findByPk(1); 
-    let price = unit.price;
+    
+    // Determine Base Rates
+    // Logic: If unit-specific override exists > 0, use it.
+    // Else check Global rate based on Floor Type.
+    let effectiveRegularRate = parseFloat(price_per_sqft) || 0;
+    let effectiveDiscountRate = parseFloat(discounted_price_per_sqft) || 0;
 
-    // Logic: calculate price if area is updated
-    if (super_built_up_area && project) {
-        // Simple logic: regular price. 
-        // Real logic might need to know if it's "Group" price etc. 
-        // For now, let's use regular_price_sqft * area
-        price = parseFloat(super_built_up_area) * parseFloat(project.regular_price_sqft);
+    // Auto-fetch global if no override
+    if (project && effectiveRegularRate === 0) {
+        if (unit.Floor?.type === 'RESIDENTIAL') effectiveRegularRate = parseFloat(project.residential_rate) || 0;
+        else if (unit.Floor?.type === 'OFFICE') effectiveRegularRate = parseFloat(project.office_rate) || 0;
+        else if (unit.Floor?.type === 'SHOP') effectiveRegularRate = parseFloat(project.shop_rate) || 0;
+        else effectiveRegularRate = parseFloat(project.regular_price_sqft) || 0; // Fallback
     }
+
+    // Calculate Finals
+    const area = parseFloat(super_built_up_area) || 0;
+    const final_regular_price = area * effectiveRegularRate;
+    const final_discounted_price = area * effectiveDiscountRate;
 
     await unit.update({
       unit_number,
       unit_type_id,
       carpet_area,
       super_built_up_area,
+      bhk_type,
       status,
-      price
+      price_per_sqft,
+      discounted_price_per_sqft,
+      final_regular_price,
+      final_discounted_price
     });
 
     res.json({ message: 'Unit updated', unit });

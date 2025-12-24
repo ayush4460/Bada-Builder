@@ -5,7 +5,10 @@ const { sequelize } = require('../config/db');
 
 const Project = sequelize.define('Project', {
   name: { type: DataTypes.STRING, defaultValue: 'Bada Builder Project' },
-  regular_price_sqft: { type: DataTypes.DECIMAL(10, 2), defaultValue: 0 },
+  residential_rate: { type: DataTypes.DECIMAL(10, 2), defaultValue: 0 },
+  office_rate: { type: DataTypes.DECIMAL(10, 2), defaultValue: 0 },
+  shop_rate: { type: DataTypes.DECIMAL(10, 2), defaultValue: 0 },
+  regular_price_sqft: { type: DataTypes.DECIMAL(10, 2), defaultValue: 0 }, // Legacy/Fallback
   group_price_sqft: { type: DataTypes.DECIMAL(10, 2), defaultValue: 0 },
 });
 
@@ -36,13 +39,26 @@ const UnitType = sequelize.define('UnitType', {
 
 const Unit = sequelize.define('Unit', {
   unit_number: { type: DataTypes.STRING, allowNull: false },
-  carpet_area: { type: DataTypes.DECIMAL(10, 2), allowNull: false },
-  super_built_up_area: { type: DataTypes.DECIMAL(10, 2), allowNull: false },
+  // Dimensions
+  carpet_area: { type: DataTypes.DECIMAL(10, 2), defaultValue: 0 },
+  super_built_up_area: { type: DataTypes.DECIMAL(10, 2), defaultValue: 0 },
+  // Configuration
+  bhk_type: { 
+    type: DataTypes.ENUM('1BHK', '2BHK', '3BHK', '4BHK', '5BHK', 'STUDIO', 'PENTHOUSE', 'N/A'), 
+    defaultValue: 'N/A' 
+  },
+  // Status
   status: {
     type: DataTypes.ENUM('AVAILABLE', 'ON_HOLD', 'BOOKED'),
     defaultValue: 'AVAILABLE'
   },
-  price: { type: DataTypes.DECIMAL(15, 2), defaultValue: 0 }, // Calculated
+  // Pricing Overrides (if 0, use global)
+  price_per_sqft: { type: DataTypes.DECIMAL(10, 2), defaultValue: 0 }, // Regular rate override
+  discounted_price_per_sqft: { type: DataTypes.DECIMAL(10, 2), defaultValue: 0 }, // Discount rate
+  
+  // Final calculated prices (can be cached here or calculated on fly)
+  final_regular_price: { type: DataTypes.DECIMAL(15, 2), defaultValue: 0 },
+  final_discounted_price: { type: DataTypes.DECIMAL(15, 2), defaultValue: 0 },
 });
 
 // --- Associations ---
